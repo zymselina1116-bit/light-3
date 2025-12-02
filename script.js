@@ -310,8 +310,8 @@ function refractRay(incident, normal, entering, wavelengthEta) {
 }
 
 /**
- * Trace a single ray through the glass field with specific wavelength
- * Each wavelength refracts differently, creating chromatic dispersion
+ * Trace a single ray through the glass field
+ * White beams split into spectral wavelengths when hitting glass (chromatic dispersion)
  */
 function traceRay(startX, startY, dirX, dirY, wavelength, depth = 0) {
     if (depth >= MAX_BOUNCES) return [];
@@ -319,6 +319,7 @@ function traceRay(startX, startY, dirX, dirY, wavelength, depth = 0) {
     const segments = [];
     const rayStart = { x: startX, y: startY };
     const rayDir = { x: dirX, y: dirY };
+    const isWhiteBeam = (wavelength === null); // White beam until first glass hit
 
     // Find closest intersection with any glass block
     let closestBlock = null;
@@ -335,63 +336,126 @@ function traceRay(startX, startY, dirX, dirY, wavelength, depth = 0) {
     }
 
     if (closestIntersection && closestBlock) {
-        // Add segment from ray start to intersection with wavelength color
-        segments.push({
-            x1: rayStart.x,
-            y1: rayStart.y,
-            x2: closestIntersection.point.x,
-            y2: closestIntersection.point.y,
-            intensity: 1.0 / (depth + 1),
-            wavelength: wavelength
-        });
-
-        // Compute refracted direction (entering glass) with wavelength-specific refraction
-        const refractedDir = refractRay(
-            rayDir,
-            closestIntersection.normal,
-            true,
-            wavelength.eta
-        );
-
-        // Continue ray from inside the glass block
-        // Find exit point
-        const exitIntersection = findRayIntersection(
-            { x: closestIntersection.point.x + refractedDir.x * 0.1, y: closestIntersection.point.y + refractedDir.y * 0.1 },
-            refractedDir,
-            closestBlock
-        );
-
-        if (exitIntersection) {
-            // Segment inside glass (slightly dimmer, with wavelength color)
+        if (isWhiteBeam) {
+            // WHITE BEAM hits glass - add white segment up to intersection
             segments.push({
-                x1: closestIntersection.point.x,
-                y1: closestIntersection.point.y,
-                x2: exitIntersection.point.x,
-                y2: exitIntersection.point.y,
-                intensity: 0.7 / (depth + 1),
-                insideGlass: true,
+                x1: rayStart.x,
+                y1: rayStart.y,
+                x2: closestIntersection.point.x,
+                y2: closestIntersection.point.y,
+                intensity: 1.0 / (depth + 1),
+                wavelength: null, // null = white beam
+                isWhite: true
+            });
+
+            // CHROMATIC DISPERSION: Split into all wavelengths at glass entry
+            for (const wl of WAVELENGTHS) {
+                // Each wavelength refracts at different angle
+                const refractedDir = refractRay(
+                    rayDir,
+                    closestIntersection.normal,
+                    true,
+                    wl.eta
+                );
+
+                // Find exit point for this wavelength
+                const exitIntersection = findRayIntersection(
+                    { x: closestIntersection.point.x + refractedDir.x * 0.1, y: closestIntersection.point.y + refractedDir.y * 0.1 },
+                    refractedDir,
+                    closestBlock
+                );
+
+                if (exitIntersection) {
+                    // Segment inside glass with spectral color
+                    segments.push({
+                        x1: closestIntersection.point.x,
+                        y1: closestIntersection.point.y,
+                        x2: exitIntersection.point.x,
+                        y2: exitIntersection.point.y,
+                        intensity: 0.7 / (depth + 1),
+                        insideGlass: true,
+                        wavelength: wl
+                    });
+
+                    // Refract again when exiting
+                    const exitDir = refractRay(
+                        refractedDir,
+                        { x: -exitIntersection.normal.x, y: -exitIntersection.normal.y },
+                        false,
+                        wl.eta
+                    );
+
+                    // Continue tracing this wavelength
+                    const furtherSegments = traceRay(
+                        exitIntersection.point.x,
+                        exitIntersection.point.y,
+                        exitDir.x,
+                        exitDir.y,
+                        wl,
+                        depth + 1
+                    );
+
+                    segments.push(...furtherSegments);
+                }
+            }
+        } else {
+            // COLORED BEAM (already dispersed) - continue with single wavelength
+            segments.push({
+                x1: rayStart.x,
+                y1: rayStart.y,
+                x2: closestIntersection.point.x,
+                y2: closestIntersection.point.y,
+                intensity: 1.0 / (depth + 1),
                 wavelength: wavelength
             });
 
-            // Refract again when exiting with wavelength-specific refraction
-            const exitDir = refractRay(
-                refractedDir,
-                { x: -exitIntersection.normal.x, y: -exitIntersection.normal.y },
-                false,
+            // Compute refracted direction with wavelength-specific refraction
+            const refractedDir = refractRay(
+                rayDir,
+                closestIntersection.normal,
+                true,
                 wavelength.eta
             );
 
-            // Continue tracing from exit point
-            const furtherSegments = traceRay(
-                exitIntersection.point.x,
-                exitIntersection.point.y,
-                exitDir.x,
-                exitDir.y,
-                wavelength,
-                depth + 1
+            // Find exit point
+            const exitIntersection = findRayIntersection(
+                { x: closestIntersection.point.x + refractedDir.x * 0.1, y: closestIntersection.point.y + refractedDir.y * 0.1 },
+                refractedDir,
+                closestBlock
             );
 
-            segments.push(...furtherSegments);
+            if (exitIntersection) {
+                // Segment inside glass
+                segments.push({
+                    x1: closestIntersection.point.x,
+                    y1: closestIntersection.point.y,
+                    x2: exitIntersection.point.x,
+                    y2: exitIntersection.point.y,
+                    intensity: 0.7 / (depth + 1),
+                    insideGlass: true,
+                    wavelength: wavelength
+                });
+
+                // Refract again when exiting
+                const exitDir = refractRay(
+                    refractedDir,
+                    { x: -exitIntersection.normal.x, y: -exitIntersection.normal.y },
+                    false,
+                    wavelength.eta
+                );
+
+                // Continue tracing
+                const furtherSegments = traceRay(
+                    exitIntersection.point.x,
+                    exitIntersection.point.y,
+                    exitDir.x,
+                    exitDir.y,
+                    wavelength,
+                    depth + 1
+                );
+
+                segments.push(...furtherSegments);
+            }
         }
     } else {
         // No intersection - ray goes to top of screen
@@ -406,7 +470,8 @@ function traceRay(startX, startY, dirX, dirY, wavelength, depth = 0) {
                 x2: endX,
                 y2: endY,
                 intensity: 1.0 / (depth + 1),
-                wavelength: wavelength
+                wavelength: wavelength,
+                isWhite: isWhiteBeam
             });
         }
     }
@@ -416,13 +481,13 @@ function traceRay(startX, startY, dirX, dirY, wavelength, depth = 0) {
 
 /**
  * Compute all beam paths from the light bar at current angle
- * Each ray is traced for all wavelengths to create chromatic dispersion
+ * Emits WHITE beams that split into spectrum when hitting glass
  */
 function computeBeams() {
     const beams = [];
     const angleRad = lightBar.angle * (Math.PI / 180);
 
-    // Cast multiple rays with slight angle variations for richer patterns
+    // Cast multiple WHITE rays with slight angle variations
     for (let i = 0; i < RAY_COUNT; i++) {
         const spreadAngle = ((i - RAY_COUNT / 2) / RAY_COUNT) * 20 * (Math.PI / 180);
         const rayAngle = angleRad + spreadAngle;
@@ -433,19 +498,17 @@ function computeBeams() {
         const startX = lightBar.x + ((i - RAY_COUNT / 2) / RAY_COUNT) * lightBar.width * 0.8;
         const startY = lightBar.y;
 
-        // Trace ray for EACH wavelength to create chromatic dispersion
-        // Each wavelength will refract at a slightly different angle
-        for (const wavelength of WAVELENGTHS) {
-            const segments = traceRay(
-                startX,
-                startY,
-                dirX,
-                dirY,
-                wavelength
-            );
+        // Trace WHITE beam (wavelength = null)
+        // It will split into spectrum when it hits glass
+        const segments = traceRay(
+            startX,
+            startY,
+            dirX,
+            dirY,
+            null  // null = white beam, disperses at first glass intersection
+        );
 
-            beams.push(...segments);
-        }
+        beams.push(...segments);
     }
 
     return beams;
@@ -574,19 +637,33 @@ function drawGlassBlock(block, time) {
 }
 
 /**
- * Draw a prismatic beam segment with chromatic edges and intense bloom
- * Each beam has its wavelength color with enhanced glow for brightness
+ * Draw a beam segment - pure white for initial beams, spectral colors after glass
+ * White beams are monochromatic and bright, spectral beams show chromatic dispersion
  */
 function drawBeam(segment, alpha = 1.0) {
-    const { x1, y1, x2, y2, intensity, insideGlass, wavelength } = segment;
+    const { x1, y1, x2, y2, intensity, insideGlass, wavelength, isWhite } = segment;
 
-    const effectiveAlpha = alpha * intensity * wavelength.weight;
+    // Check if this is a white beam (before glass interaction)
+    const isWhiteBeam = isWhite || wavelength === null;
 
-    // Get RGB values from wavelength color for manipulation
-    const colorMatch = wavelength.color.match(/\d+/g);
-    const r = parseInt(colorMatch[0]);
-    const g = parseInt(colorMatch[1]);
-    const b = parseInt(colorMatch[2]);
+    let r, g, b, effectiveAlpha;
+
+    if (isWhiteBeam) {
+        // PURE WHITE BEAM - monochromatic, no color
+        r = 255;
+        g = 255;
+        b = 255;
+        effectiveAlpha = alpha * intensity * 1.2; // Extra bright white
+    } else {
+        // SPECTRAL BEAM - use wavelength color
+        effectiveAlpha = alpha * intensity * wavelength.weight;
+
+        // Get RGB values from wavelength color for manipulation
+        const colorMatch = wavelength.color.match(/\d+/g);
+        r = parseInt(colorMatch[0]);
+        g = parseInt(colorMatch[1]);
+        b = parseInt(colorMatch[2]);
+    }
 
     // Enhanced bloom effect - more layers, wider spread, higher intensity
     const bloomLayers = [
@@ -615,51 +692,53 @@ function drawBeam(segment, alpha = 1.0) {
         ctx.stroke();
     }
 
-    // Add chromatic aberration edges for prismatic effect
-    // Calculate perpendicular offset for edge colors
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const length = Math.hypot(dx, dy);
+    // Add chromatic aberration edges ONLY for spectral beams (not white)
+    if (!isWhiteBeam) {
+        // Calculate perpendicular offset for edge colors
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const length = Math.hypot(dx, dy);
 
-    if (length > 0) {
-        const perpX = -dy / length;
-        const perpY = dx / length;
-        const edgeOffset = 2.5; // Pixels to offset chromatic edges
+        if (length > 0) {
+            const perpX = -dy / length;
+            const perpY = dx / length;
+            const edgeOffset = 2.5; // Pixels to offset chromatic edges
 
-        // Red/orange edge on one side
-        const redEdgeLayers = [
-            { width: 6, alpha: effectiveAlpha * 0.3, color: 'rgb(255, 80, 60)' },
-            { width: 3, alpha: effectiveAlpha * 0.5, color: 'rgb(255, 120, 70)' },
-            { width: 1, alpha: effectiveAlpha * 0.7, color: 'rgb(255, 160, 90)' }
-        ];
+            // Red/orange edge on one side
+            const redEdgeLayers = [
+                { width: 6, alpha: effectiveAlpha * 0.3, color: 'rgb(255, 80, 60)' },
+                { width: 3, alpha: effectiveAlpha * 0.5, color: 'rgb(255, 120, 70)' },
+                { width: 1, alpha: effectiveAlpha * 0.7, color: 'rgb(255, 160, 90)' }
+            ];
 
-        for (const layer of redEdgeLayers) {
-            ctx.strokeStyle = layer.color.replace('rgb', 'rgba').replace(')', `, ${layer.alpha})`);
-            ctx.lineWidth = layer.width;
-            ctx.lineCap = 'round';
+            for (const layer of redEdgeLayers) {
+                ctx.strokeStyle = layer.color.replace('rgb', 'rgba').replace(')', `, ${layer.alpha})`);
+                ctx.lineWidth = layer.width;
+                ctx.lineCap = 'round';
 
-            ctx.beginPath();
-            ctx.moveTo(x1 + perpX * edgeOffset, y1 + perpY * edgeOffset);
-            ctx.lineTo(x2 + perpX * edgeOffset, y2 + perpY * edgeOffset);
-            ctx.stroke();
-        }
+                ctx.beginPath();
+                ctx.moveTo(x1 + perpX * edgeOffset, y1 + perpY * edgeOffset);
+                ctx.lineTo(x2 + perpX * edgeOffset, y2 + perpY * edgeOffset);
+                ctx.stroke();
+            }
 
-        // Blue/violet edge on other side
-        const blueEdgeLayers = [
-            { width: 6, alpha: effectiveAlpha * 0.3, color: 'rgb(100, 120, 255)' },
-            { width: 3, alpha: effectiveAlpha * 0.5, color: 'rgb(120, 140, 255)' },
-            { width: 1, alpha: effectiveAlpha * 0.7, color: 'rgb(160, 180, 255)' }
-        ];
+            // Blue/violet edge on other side
+            const blueEdgeLayers = [
+                { width: 6, alpha: effectiveAlpha * 0.3, color: 'rgb(100, 120, 255)' },
+                { width: 3, alpha: effectiveAlpha * 0.5, color: 'rgb(120, 140, 255)' },
+                { width: 1, alpha: effectiveAlpha * 0.7, color: 'rgb(160, 180, 255)' }
+            ];
 
-        for (const layer of blueEdgeLayers) {
-            ctx.strokeStyle = layer.color.replace('rgb', 'rgba').replace(')', `, ${layer.alpha})`);
-            ctx.lineWidth = layer.width;
-            ctx.lineCap = 'round';
+            for (const layer of blueEdgeLayers) {
+                ctx.strokeStyle = layer.color.replace('rgb', 'rgba').replace(')', `, ${layer.alpha})`);
+                ctx.lineWidth = layer.width;
+                ctx.lineCap = 'round';
 
-            ctx.beginPath();
-            ctx.moveTo(x1 - perpX * edgeOffset, y1 - perpY * edgeOffset);
-            ctx.lineTo(x2 - perpX * edgeOffset, y2 - perpY * edgeOffset);
-            ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(x1 - perpX * edgeOffset, y1 - perpY * edgeOffset);
+                ctx.lineTo(x2 - perpX * edgeOffset, y2 - perpY * edgeOffset);
+                ctx.stroke();
+            }
         }
     }
 
@@ -678,34 +757,30 @@ function drawBeam(segment, alpha = 1.0) {
 }
 
 /**
- * Draw the light bar at bottom with angle indicator and spectral rainbow
+ * Draw the light bar at bottom with angle indicator - PURE WHITE light source
  */
 function drawLightBar() {
     const { x, y, width, height, angle } = lightBar;
 
-    // Main bar with prismatic rainbow gradient
+    // Main bar with PURE WHITE gradient (bright center, fading edges)
     const barGradient = ctx.createLinearGradient(x - width / 2, y, x + width / 2, y);
-    barGradient.addColorStop(0, 'rgba(255, 50, 50, 0.8)');      // Red
-    barGradient.addColorStop(0.17, 'rgba(255, 140, 0, 0.9)');   // Orange
-    barGradient.addColorStop(0.33, 'rgba(255, 230, 0, 1.0)');   // Yellow
-    barGradient.addColorStop(0.5, 'rgba(50, 255, 100, 1.0)');   // Green (center, brightest)
-    barGradient.addColorStop(0.67, 'rgba(0, 200, 255, 1.0)');   // Cyan
-    barGradient.addColorStop(0.83, 'rgba(50, 100, 255, 0.9)');  // Blue
-    barGradient.addColorStop(1, 'rgba(180, 50, 255, 0.8)');     // Violet
+    barGradient.addColorStop(0, 'rgba(255, 255, 255, 0.6)');
+    barGradient.addColorStop(0.5, 'rgba(255, 255, 255, 1.0)');  // Brightest at center
+    barGradient.addColorStop(1, 'rgba(255, 255, 255, 0.6)');
 
     ctx.fillStyle = barGradient;
     ctx.fillRect(x - width / 2, y - height / 2, width, height);
 
-    // Enhanced spectral glow around bar
+    // Enhanced white glow around bar - EXTREMELY BRIGHT
     ctx.shadowColor = 'rgba(255, 255, 255, 1.0)';
-    ctx.shadowBlur = 30;
+    ctx.shadowBlur = 35;
     ctx.fillRect(x - width / 2, y - height / 2, width, height);
     ctx.shadowBlur = 0;
 
-    // Additional outer glow layers for brightness
-    for (let i = 0; i < 3; i++) {
-        const glowSize = 20 + i * 15;
-        const glowAlpha = 0.2 - i * 0.06;
+    // Additional outer glow layers for maximum brightness
+    for (let i = 0; i < 4; i++) {
+        const glowSize = 25 + i * 18;
+        const glowAlpha = 0.25 - i * 0.06;
 
         ctx.fillStyle = `rgba(255, 255, 255, ${glowAlpha})`;
         ctx.fillRect(
@@ -722,29 +797,23 @@ function drawLightBar() {
 
     ctx.beginPath();
     ctx.arc(x, y, indicatorRadius, Math.PI, 0, false);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // Direction arrow with spectral color
+    // Direction arrow - pure white
     const arrowLength = 35;
     const arrowX = x + Math.cos(angleRad) * arrowLength;
     const arrowY = y - Math.sin(angleRad) * arrowLength;
 
-    // Arrow with gradient based on angle
-    const arrowHue = (angle / 180) * 360;
-    const arrowGradient = ctx.createLinearGradient(x, y, arrowX, arrowY);
-    arrowGradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
-    arrowGradient.addColorStop(1, `hsla(${arrowHue}, 80%, 70%, 0.9)`);
-
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(arrowX, arrowY);
-    ctx.strokeStyle = arrowGradient;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
     ctx.lineWidth = 3;
     ctx.stroke();
 
-    // Arrow head with glow
+    // Arrow head with white glow
     const headSize = 10;
     const headAngle = Math.PI / 6;
 
@@ -759,21 +828,20 @@ function drawLightBar() {
         arrowX - Math.cos(angleRad + headAngle) * headSize,
         arrowY + Math.sin(angleRad + headAngle) * headSize
     );
-    ctx.strokeStyle = `hsla(${arrowHue}, 90%, 75%, 1.0)`;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 1.0)';
     ctx.lineWidth = 2.5;
     ctx.stroke();
 
-    // Angle markers with spectral colors
+    // Angle markers - subtle white
     for (let i = 0; i <= 180; i += 30) {
         const markerAngle = i * (Math.PI / 180);
         const innerR = indicatorRadius - 5;
         const outerR = indicatorRadius + 5;
-        const markerHue = (i / 180) * 360;
 
         ctx.beginPath();
         ctx.moveTo(x + Math.cos(markerAngle) * innerR, y - Math.sin(markerAngle) * innerR);
         ctx.lineTo(x + Math.cos(markerAngle) * outerR, y - Math.sin(markerAngle) * outerR);
-        ctx.strokeStyle = `hsla(${markerHue}, 80%, 65%, 0.5)`;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
         ctx.lineWidth = 1.5;
         ctx.stroke();
     }
