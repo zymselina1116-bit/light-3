@@ -33,8 +33,8 @@ const WAVELENGTHS = [
     { name: 'violet',  color: 'rgb(180, 50, 255)',   eta: 1.530, weight: 0.8 }
 ];
 
-// Glass blocks configuration
-const GLASS_BLOCK_COUNT = 80; // Dense field for complex refractions
+// Glass blocks configuration - OPTIMIZED for performance
+const GLASS_BLOCK_COUNT = 45; // Reduced for better performance while maintaining visual richness
 const glassBlocks = [];
 
 // Light bar configuration
@@ -61,9 +61,9 @@ let beamTransition = 1.0; // 0 = previous, 1 = current
 // Animation time
 let animationTime = 0;
 
-// Performance optimization
-const MAX_BOUNCES = 6; // Maximum refractions per ray
-const RAY_COUNT = 5;   // Number of initial rays to cast
+// Performance optimization - CRITICAL for 60fps
+const MAX_BOUNCES = 3; // Reduced from 6 - prevents exponential explosion of beams
+const RAY_COUNT = 4;   // Reduced from 5 - 4 rays × 7 wavelengths = 28 initial dispersed beams
 
 // ============================================================================
 // INITIALIZATION
@@ -665,16 +665,13 @@ function drawBeam(segment, alpha = 1.0) {
         b = parseInt(colorMatch[2]);
     }
 
-    // Enhanced bloom effect - more layers, wider spread, higher intensity
+    // Optimized bloom effect - fewer layers for better performance
     const bloomLayers = [
-        { width: 40, alpha: effectiveAlpha * 0.08 },  // Outer bloom
-        { width: 28, alpha: effectiveAlpha * 0.15 },
-        { width: 18, alpha: effectiveAlpha * 0.25 },
-        { width: 12, alpha: effectiveAlpha * 0.4 },
-        { width: 8, alpha: effectiveAlpha * 0.6 },
-        { width: 4, alpha: effectiveAlpha * 0.85 },
-        { width: 2, alpha: effectiveAlpha * 1.0 },    // Core
-        { width: 1, alpha: effectiveAlpha * 1.2 }     // Bright center
+        { width: 30, alpha: effectiveAlpha * 0.1 },   // Outer bloom
+        { width: 18, alpha: effectiveAlpha * 0.3 },
+        { width: 10, alpha: effectiveAlpha * 0.6 },
+        { width: 4, alpha: effectiveAlpha * 0.9 },
+        { width: 1.5, alpha: effectiveAlpha * 1.2 }   // Bright center
     ];
 
     // Draw main beam with bloom
@@ -704,11 +701,10 @@ function drawBeam(segment, alpha = 1.0) {
             const perpY = dx / length;
             const edgeOffset = 2.5; // Pixels to offset chromatic edges
 
-            // Red/orange edge on one side
+            // Red/orange edge on one side - OPTIMIZED (fewer layers)
             const redEdgeLayers = [
-                { width: 6, alpha: effectiveAlpha * 0.3, color: 'rgb(255, 80, 60)' },
-                { width: 3, alpha: effectiveAlpha * 0.5, color: 'rgb(255, 120, 70)' },
-                { width: 1, alpha: effectiveAlpha * 0.7, color: 'rgb(255, 160, 90)' }
+                { width: 4, alpha: effectiveAlpha * 0.4, color: 'rgb(255, 100, 70)' },
+                { width: 1.5, alpha: effectiveAlpha * 0.7, color: 'rgb(255, 140, 90)' }
             ];
 
             for (const layer of redEdgeLayers) {
@@ -722,11 +718,10 @@ function drawBeam(segment, alpha = 1.0) {
                 ctx.stroke();
             }
 
-            // Blue/violet edge on other side
+            // Blue/violet edge on other side - OPTIMIZED (fewer layers)
             const blueEdgeLayers = [
-                { width: 6, alpha: effectiveAlpha * 0.3, color: 'rgb(100, 120, 255)' },
-                { width: 3, alpha: effectiveAlpha * 0.5, color: 'rgb(120, 140, 255)' },
-                { width: 1, alpha: effectiveAlpha * 0.7, color: 'rgb(160, 180, 255)' }
+                { width: 4, alpha: effectiveAlpha * 0.4, color: 'rgb(110, 130, 255)' },
+                { width: 1.5, alpha: effectiveAlpha * 0.7, color: 'rgb(150, 170, 255)' }
             ];
 
             for (const layer of blueEdgeLayers) {
