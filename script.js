@@ -638,8 +638,8 @@ function drawGlassBlock(block, time) {
 }
 
 /**
- * Draw a beam segment - pure white for initial beams, spectral colors after glass
- * White beams are monochromatic and bright, spectral beams show chromatic dispersion
+ * Draw a beam segment with physically accurate dispersion rendering
+ * Pure wavelength colors only - no fake chromatic edges
  */
 function drawBeam(segment, alpha = 1.0) {
     const { x1, y1, x2, y2, intensity, insideGlass, wavelength, isWhite } = segment;
@@ -654,31 +654,30 @@ function drawBeam(segment, alpha = 1.0) {
         r = 255;
         g = 255;
         b = 255;
-        effectiveAlpha = alpha * intensity * 1.2; // Extra bright white
+        effectiveAlpha = alpha * intensity * 1.3; // Bright white
     } else {
-        // SPECTRAL BEAM - use wavelength color
-        effectiveAlpha = alpha * intensity * wavelength.weight;
+        // SPECTRAL BEAM - pure wavelength color from dispersion
+        effectiveAlpha = alpha * intensity * wavelength.weight * 1.1;
 
-        // Get RGB values from wavelength color for manipulation
+        // Get RGB values from wavelength color
         const colorMatch = wavelength.color.match(/\d+/g);
         r = parseInt(colorMatch[0]);
         g = parseInt(colorMatch[1]);
         b = parseInt(colorMatch[2]);
     }
 
-    // Optimized bloom effect - fewer layers for better performance
+    // Subtle bloom - thinner, sharper for realistic prismatic streaks
     const bloomLayers = [
-        { width: 30, alpha: effectiveAlpha * 0.1 },   // Outer bloom
-        { width: 18, alpha: effectiveAlpha * 0.3 },
-        { width: 10, alpha: effectiveAlpha * 0.6 },
-        { width: 4, alpha: effectiveAlpha * 0.9 },
-        { width: 1.5, alpha: effectiveAlpha * 1.2 }   // Bright center
+        { width: 12, alpha: effectiveAlpha * 0.08 },   // Soft outer glow
+        { width: 6, alpha: effectiveAlpha * 0.2 },
+        { width: 3, alpha: effectiveAlpha * 0.5 },
+        { width: 1.2, alpha: effectiveAlpha * 1.0 }    // Sharp core
     ];
 
-    // Draw main beam with bloom
+    // Draw beam with subtle bloom
     for (const layer of bloomLayers) {
-        // Boost color intensity for brighter appearance
-        const boostFactor = insideGlass ? 1.2 : 1.5;
+        // Pure wavelength color - no artificial color boost
+        const boostFactor = insideGlass ? 1.0 : 1.2;
         ctx.strokeStyle = `rgba(${Math.min(255, r * boostFactor)}, ${Math.min(255, g * boostFactor)}, ${Math.min(255, b * boostFactor)}, ${layer.alpha})`;
         ctx.lineWidth = layer.width;
         ctx.lineCap = 'round';
@@ -690,58 +689,10 @@ function drawBeam(segment, alpha = 1.0) {
         ctx.stroke();
     }
 
-    // Add chromatic aberration edges ONLY for spectral beams (not white)
-    if (!isWhiteBeam) {
-        // Calculate perpendicular offset for edge colors
-        const dx = x2 - x1;
-        const dy = y2 - y1;
-        const length = Math.hypot(dx, dy);
-
-        if (length > 0) {
-            const perpX = -dy / length;
-            const perpY = dx / length;
-            const edgeOffset = 2.5; // Pixels to offset chromatic edges
-
-            // Red/orange edge on one side - OPTIMIZED (fewer layers)
-            const redEdgeLayers = [
-                { width: 4, alpha: effectiveAlpha * 0.4, color: 'rgb(255, 100, 70)' },
-                { width: 1.5, alpha: effectiveAlpha * 0.7, color: 'rgb(255, 140, 90)' }
-            ];
-
-            for (const layer of redEdgeLayers) {
-                ctx.strokeStyle = layer.color.replace('rgb', 'rgba').replace(')', `, ${layer.alpha})`);
-                ctx.lineWidth = layer.width;
-                ctx.lineCap = 'round';
-
-                ctx.beginPath();
-                ctx.moveTo(x1 + perpX * edgeOffset, y1 + perpY * edgeOffset);
-                ctx.lineTo(x2 + perpX * edgeOffset, y2 + perpY * edgeOffset);
-                ctx.stroke();
-            }
-
-            // Blue/violet edge on other side - OPTIMIZED (fewer layers)
-            const blueEdgeLayers = [
-                { width: 4, alpha: effectiveAlpha * 0.4, color: 'rgb(110, 130, 255)' },
-                { width: 1.5, alpha: effectiveAlpha * 0.7, color: 'rgb(150, 170, 255)' }
-            ];
-
-            for (const layer of blueEdgeLayers) {
-                ctx.strokeStyle = layer.color.replace('rgb', 'rgba').replace(')', `, ${layer.alpha})`);
-                ctx.lineWidth = layer.width;
-                ctx.lineCap = 'round';
-
-                ctx.beginPath();
-                ctx.moveTo(x1 - perpX * edgeOffset, y1 - perpY * edgeOffset);
-                ctx.lineTo(x2 - perpX * edgeOffset, y2 - perpY * edgeOffset);
-                ctx.stroke();
-            }
-        }
-    }
-
-    // Extra bright core for additive blending effect
+    // Sharp bright core for definition
     ctx.globalCompositeOperation = 'lighter';
-    ctx.strokeStyle = `rgba(255, 255, 255, ${effectiveAlpha * 0.4})`;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, ${effectiveAlpha * 0.5})`;
+    ctx.lineWidth = 0.8;
     ctx.lineCap = 'round';
 
     ctx.beginPath();
