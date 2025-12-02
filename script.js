@@ -1,12 +1,12 @@
 /**
- * Light Refraction Experience
+ * Light Refraction Experience - Prismatic Dispersion Edition
  *
  * Architecture:
- * 1. Glass Blocks: Generate dense field of 3D-like polygonal glass volumes
+ * 1. Glass Blocks: Generate dense field of 3D-like polygonal glass volumes with iridescence
  * 2. Light Bar: Interactive horizontal bar at bottom for angle control
  * 3. Ray Casting: Emit beams from bar, trace through glass blocks
- * 4. Refraction: Compute bent paths when rays intersect glass
- * 5. Rendering: Draw glass blocks, beams with glow, smooth transitions
+ * 4. Chromatic Dispersion: Split light into spectral wavelengths with different refraction
+ * 5. Rendering: Draw glass blocks, prismatic beams with bloom, smooth transitions
  */
 
 // ============================================================================
@@ -20,6 +20,18 @@ const angleDisplay = document.getElementById('angleValue');
 // Canvas dimensions
 let canvasWidth = 0;
 let canvasHeight = 0;
+
+// Spectral wavelength configuration for chromatic dispersion
+// Each wavelength has a unique color and refractive index
+const WAVELENGTHS = [
+    { name: 'red',     color: 'rgb(255, 50, 50)',    eta: 1.514, weight: 1.0 },
+    { name: 'orange',  color: 'rgb(255, 140, 0)',    eta: 1.517, weight: 0.9 },
+    { name: 'yellow',  color: 'rgb(255, 230, 0)',    eta: 1.520, weight: 0.8 },
+    { name: 'green',   color: 'rgb(50, 255, 100)',   eta: 1.522, weight: 0.9 },
+    { name: 'cyan',    color: 'rgb(0, 200, 255)',    eta: 1.524, weight: 0.85 },
+    { name: 'blue',    color: 'rgb(50, 100, 255)',   eta: 1.527, weight: 0.9 },
+    { name: 'violet',  color: 'rgb(180, 50, 255)',   eta: 1.530, weight: 0.8 }
+];
 
 // Glass blocks configuration
 const GLASS_BLOCK_COUNT = 80; // Dense field for complex refractions
@@ -41,7 +53,7 @@ let isDragging = false;
 let dragStartX = 0;
 let dragStartAngle = 0;
 
-// Beam paths (computed from ray tracing)
+// Beam paths (computed from ray tracing) - now includes wavelength information
 let currentBeams = [];
 let previousBeams = [];
 let beamTransition = 1.0; // 0 = previous, 1 = current
@@ -263,14 +275,15 @@ function findRayIntersection(rayStart, rayDir, block) {
 // ============================================================================
 
 /**
- * Compute refracted ray direction using simplified Snell's law
+ * Compute refracted ray direction using Snell's law with wavelength-specific refractive index
+ * Different wavelengths refract at different angles, creating chromatic dispersion
  */
-function refractRay(incident, normal, entering) {
-    // Simplified refraction: bend ray based on angle of incidence
+function refractRay(incident, normal, entering, wavelengthEta) {
+    // Chromatic dispersion: use wavelength-specific refractive index
     const incidentDot = incident.x * normal.x + incident.y * normal.y;
 
-    // Refraction index (glass ~1.5)
-    const eta = entering ? 1.0 / 1.5 : 1.5 / 1.0;
+    // Use wavelength-specific eta for dispersion
+    const eta = entering ? 1.0 / wavelengthEta : wavelengthEta / 1.0;
 
     const k = 1 - eta * eta * (1 - incidentDot * incidentDot);
 
@@ -297,9 +310,10 @@ function refractRay(incident, normal, entering) {
 }
 
 /**
- * Trace a single ray through the glass field
+ * Trace a single ray through the glass field with specific wavelength
+ * Each wavelength refracts differently, creating chromatic dispersion
  */
-function traceRay(startX, startY, dirX, dirY, depth = 0) {
+function traceRay(startX, startY, dirX, dirY, wavelength, depth = 0) {
     if (depth >= MAX_BOUNCES) return [];
 
     const segments = [];
@@ -321,20 +335,22 @@ function traceRay(startX, startY, dirX, dirY, depth = 0) {
     }
 
     if (closestIntersection && closestBlock) {
-        // Add segment from ray start to intersection
+        // Add segment from ray start to intersection with wavelength color
         segments.push({
             x1: rayStart.x,
             y1: rayStart.y,
             x2: closestIntersection.point.x,
             y2: closestIntersection.point.y,
-            intensity: 1.0 / (depth + 1)
+            intensity: 1.0 / (depth + 1),
+            wavelength: wavelength
         });
 
-        // Compute refracted direction (entering glass)
+        // Compute refracted direction (entering glass) with wavelength-specific refraction
         const refractedDir = refractRay(
             rayDir,
             closestIntersection.normal,
-            true
+            true,
+            wavelength.eta
         );
 
         // Continue ray from inside the glass block
@@ -346,21 +362,23 @@ function traceRay(startX, startY, dirX, dirY, depth = 0) {
         );
 
         if (exitIntersection) {
-            // Segment inside glass (slightly dimmer)
+            // Segment inside glass (slightly dimmer, with wavelength color)
             segments.push({
                 x1: closestIntersection.point.x,
                 y1: closestIntersection.point.y,
                 x2: exitIntersection.point.x,
                 y2: exitIntersection.point.y,
-                intensity: 0.6 / (depth + 1),
-                insideGlass: true
+                intensity: 0.7 / (depth + 1),
+                insideGlass: true,
+                wavelength: wavelength
             });
 
-            // Refract again when exiting
+            // Refract again when exiting with wavelength-specific refraction
             const exitDir = refractRay(
                 refractedDir,
                 { x: -exitIntersection.normal.x, y: -exitIntersection.normal.y },
-                false
+                false,
+                wavelength.eta
             );
 
             // Continue tracing from exit point
@@ -369,6 +387,7 @@ function traceRay(startX, startY, dirX, dirY, depth = 0) {
                 exitIntersection.point.y,
                 exitDir.x,
                 exitDir.y,
+                wavelength,
                 depth + 1
             );
 
@@ -386,7 +405,8 @@ function traceRay(startX, startY, dirX, dirY, depth = 0) {
                 y1: rayStart.y,
                 x2: endX,
                 y2: endY,
-                intensity: 1.0 / (depth + 1)
+                intensity: 1.0 / (depth + 1),
+                wavelength: wavelength
             });
         }
     }
@@ -396,6 +416,7 @@ function traceRay(startX, startY, dirX, dirY, depth = 0) {
 
 /**
  * Compute all beam paths from the light bar at current angle
+ * Each ray is traced for all wavelengths to create chromatic dispersion
  */
 function computeBeams() {
     const beams = [];
@@ -409,15 +430,22 @@ function computeBeams() {
         const dirX = Math.cos(rayAngle);
         const dirY = -Math.sin(rayAngle);
 
-        // Trace ray through the scene
-        const segments = traceRay(
-            lightBar.x + ((i - RAY_COUNT / 2) / RAY_COUNT) * lightBar.width * 0.8,
-            lightBar.y,
-            dirX,
-            dirY
-        );
+        const startX = lightBar.x + ((i - RAY_COUNT / 2) / RAY_COUNT) * lightBar.width * 0.8;
+        const startY = lightBar.y;
 
-        beams.push(...segments);
+        // Trace ray for EACH wavelength to create chromatic dispersion
+        // Each wavelength will refract at a slightly different angle
+        for (const wavelength of WAVELENGTHS) {
+            const segments = traceRay(
+                startX,
+                startY,
+                dirX,
+                dirY,
+                wavelength
+            );
+
+            beams.push(...segments);
+        }
     }
 
     return beams;
@@ -438,7 +466,7 @@ function updateBeams() {
 // ============================================================================
 
 /**
- * Draw a single glass block with 3D effect
+ * Draw a single glass block with 3D effect and iridescent color refraction
  */
 function drawGlassBlock(block, time) {
     const { vertices, opacity, blur, depth, pulseOffset } = block;
@@ -462,101 +490,231 @@ function drawGlassBlock(block, time) {
     }
     ctx.closePath();
 
-    // Fill with subtle gradient
+    // Fill with iridescent gradient (subtle spectral colors)
     const center = getPolygonCenter(vertices);
     const gradient = ctx.createRadialGradient(
         center.x, center.y, 0,
         center.x, center.y, block.size
     );
 
-    gradient.addColorStop(0, `rgba(255, 255, 255, ${pulseOpacity * 0.4})`);
-    gradient.addColorStop(0.7, `rgba(255, 255, 255, ${pulseOpacity * 0.2})`);
-    gradient.addColorStop(1, `rgba(255, 255, 255, ${pulseOpacity * 0.05})`);
+    // Create iridescent effect with subtle color shifts
+    const hueShift = (time * 10 + block.x * 0.1 + block.y * 0.1) % 360;
+    const iridescence = 0.15; // Subtle color amount
+
+    gradient.addColorStop(0, `hsla(${hueShift}, 70%, 85%, ${pulseOpacity * 0.25})`);
+    gradient.addColorStop(0.4, `hsla(${(hueShift + 60) % 360}, 60%, 80%, ${pulseOpacity * 0.15})`);
+    gradient.addColorStop(0.7, `hsla(${(hueShift + 120) % 360}, 50%, 75%, ${pulseOpacity * 0.1})`);
+    gradient.addColorStop(1, `rgba(255, 255, 255, ${pulseOpacity * 0.02})`);
 
     ctx.fillStyle = gradient;
     ctx.fill();
 
-    // Draw edge outline
-    ctx.strokeStyle = `rgba(255, 255, 255, ${pulseOpacity * 0.6})`;
-    ctx.lineWidth = 1 + depth * 1.5;
-    ctx.stroke();
+    // Draw edge outline with spectral highlights
+    // Each edge gets a subtle rainbow shimmer
+    for (let i = 0; i < vertices.length; i++) {
+        const v1 = vertices[i];
+        const v2 = vertices[(i + 1) % vertices.length];
 
-    // Inner highlight for glassy effect
+        // Edge-specific hue based on position
+        const edgeHue = (hueShift + i * (360 / vertices.length)) % 360;
+
+        const edgeGradient = ctx.createLinearGradient(v1.x, v1.y, v2.x, v2.y);
+        edgeGradient.addColorStop(0, `hsla(${edgeHue}, 80%, 70%, ${pulseOpacity * 0.4})`);
+        edgeGradient.addColorStop(0.5, `hsla(${(edgeHue + 30) % 360}, 80%, 75%, ${pulseOpacity * 0.6})`);
+        edgeGradient.addColorStop(1, `hsla(${(edgeHue + 60) % 360}, 80%, 70%, ${pulseOpacity * 0.4})`);
+
+        ctx.beginPath();
+        ctx.moveTo(v1.x, v1.y);
+        ctx.lineTo(v2.x, v2.y);
+        ctx.strokeStyle = edgeGradient;
+        ctx.lineWidth = 1 + depth * 1.5;
+        ctx.stroke();
+    }
+
+    // Inner prismatic highlight
     ctx.beginPath();
-    const highlightOffset = block.size * 0.2;
-    ctx.moveTo(vertices[0].x, vertices[0].y);
-    for (let i = 1; i < vertices.length; i++) {
+    const highlightOffset = block.size * 0.15;
+    for (let i = 0; i < vertices.length; i++) {
         const v = vertices[i];
-        const vNext = vertices[(i + 1) % vertices.length];
-        const midX = (v.x + vNext.x) / 2;
-        const midY = (v.y + vNext.y) / 2;
-        const toCenter = { x: center.x - midX, y: center.y - midY };
+        const toCenter = { x: center.x - v.x, y: center.y - v.y };
         const length = Math.hypot(toCenter.x, toCenter.y);
 
         if (length > 0) {
             const offsetX = (toCenter.x / length) * highlightOffset;
             const offsetY = (toCenter.y / length) * highlightOffset;
-            ctx.lineTo(midX + offsetX, midY + offsetY);
+
+            if (i === 0) ctx.moveTo(v.x + offsetX, v.y + offsetY);
+            else ctx.lineTo(v.x + offsetX, v.y + offsetY);
         }
     }
     ctx.closePath();
-    ctx.strokeStyle = `rgba(255, 255, 255, ${pulseOpacity * 0.3})`;
-    ctx.lineWidth = 0.5;
+
+    // Iridescent inner glow
+    const innerHue = (hueShift + 180) % 360;
+    ctx.strokeStyle = `hsla(${innerHue}, 70%, 80%, ${pulseOpacity * 0.35})`;
+    ctx.lineWidth = 1.5;
     ctx.stroke();
+
+    // Add subtle spectral sparkle points
+    if (depth > 0.5) { // Only on closer blocks
+        const sparkleCount = 2;
+        for (let i = 0; i < sparkleCount; i++) {
+            const sparkleX = center.x + (Math.random() - 0.5) * block.size * 0.4;
+            const sparkleY = center.y + (Math.random() - 0.5) * block.size * 0.4;
+            const sparkleHue = (hueShift + Math.random() * 120) % 360;
+
+            ctx.beginPath();
+            ctx.arc(sparkleX, sparkleY, 1 + Math.random() * 2, 0, Math.PI * 2);
+            ctx.fillStyle = `hsla(${sparkleHue}, 100%, 80%, ${pulseOpacity * 0.3 * Math.random()})`;
+            ctx.fill();
+        }
+    }
 
     ctx.restore();
 }
 
 /**
- * Draw a beam segment with glow effect
+ * Draw a prismatic beam segment with chromatic edges and intense bloom
+ * Each beam has its wavelength color with enhanced glow for brightness
  */
 function drawBeam(segment, alpha = 1.0) {
-    const { x1, y1, x2, y2, intensity, insideGlass } = segment;
+    const { x1, y1, x2, y2, intensity, insideGlass, wavelength } = segment;
 
-    const effectiveAlpha = alpha * intensity;
+    const effectiveAlpha = alpha * intensity * wavelength.weight;
 
-    // Multiple passes for glow effect
-    const glowLayers = [
-        { width: 12, alpha: effectiveAlpha * 0.1 },
-        { width: 6, alpha: effectiveAlpha * 0.3 },
-        { width: 3, alpha: effectiveAlpha * 0.6 },
-        { width: 1, alpha: effectiveAlpha * 1.0 }
+    // Get RGB values from wavelength color for manipulation
+    const colorMatch = wavelength.color.match(/\d+/g);
+    const r = parseInt(colorMatch[0]);
+    const g = parseInt(colorMatch[1]);
+    const b = parseInt(colorMatch[2]);
+
+    // Enhanced bloom effect - more layers, wider spread, higher intensity
+    const bloomLayers = [
+        { width: 40, alpha: effectiveAlpha * 0.08 },  // Outer bloom
+        { width: 28, alpha: effectiveAlpha * 0.15 },
+        { width: 18, alpha: effectiveAlpha * 0.25 },
+        { width: 12, alpha: effectiveAlpha * 0.4 },
+        { width: 8, alpha: effectiveAlpha * 0.6 },
+        { width: 4, alpha: effectiveAlpha * 0.85 },
+        { width: 2, alpha: effectiveAlpha * 1.0 },    // Core
+        { width: 1, alpha: effectiveAlpha * 1.2 }     // Bright center
     ];
 
-    for (const layer of glowLayers) {
-        ctx.strokeStyle = insideGlass
-            ? `rgba(200, 200, 255, ${layer.alpha})`
-            : `rgba(255, 255, 255, ${layer.alpha})`;
+    // Draw main beam with bloom
+    for (const layer of bloomLayers) {
+        // Boost color intensity for brighter appearance
+        const boostFactor = insideGlass ? 1.2 : 1.5;
+        ctx.strokeStyle = `rgba(${Math.min(255, r * boostFactor)}, ${Math.min(255, g * boostFactor)}, ${Math.min(255, b * boostFactor)}, ${layer.alpha})`;
         ctx.lineWidth = layer.width;
         ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
 
         ctx.beginPath();
         ctx.moveTo(x1, y1);
         ctx.lineTo(x2, y2);
         ctx.stroke();
     }
+
+    // Add chromatic aberration edges for prismatic effect
+    // Calculate perpendicular offset for edge colors
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const length = Math.hypot(dx, dy);
+
+    if (length > 0) {
+        const perpX = -dy / length;
+        const perpY = dx / length;
+        const edgeOffset = 2.5; // Pixels to offset chromatic edges
+
+        // Red/orange edge on one side
+        const redEdgeLayers = [
+            { width: 6, alpha: effectiveAlpha * 0.3, color: 'rgb(255, 80, 60)' },
+            { width: 3, alpha: effectiveAlpha * 0.5, color: 'rgb(255, 120, 70)' },
+            { width: 1, alpha: effectiveAlpha * 0.7, color: 'rgb(255, 160, 90)' }
+        ];
+
+        for (const layer of redEdgeLayers) {
+            ctx.strokeStyle = layer.color.replace('rgb', 'rgba').replace(')', `, ${layer.alpha})`);
+            ctx.lineWidth = layer.width;
+            ctx.lineCap = 'round';
+
+            ctx.beginPath();
+            ctx.moveTo(x1 + perpX * edgeOffset, y1 + perpY * edgeOffset);
+            ctx.lineTo(x2 + perpX * edgeOffset, y2 + perpY * edgeOffset);
+            ctx.stroke();
+        }
+
+        // Blue/violet edge on other side
+        const blueEdgeLayers = [
+            { width: 6, alpha: effectiveAlpha * 0.3, color: 'rgb(100, 120, 255)' },
+            { width: 3, alpha: effectiveAlpha * 0.5, color: 'rgb(120, 140, 255)' },
+            { width: 1, alpha: effectiveAlpha * 0.7, color: 'rgb(160, 180, 255)' }
+        ];
+
+        for (const layer of blueEdgeLayers) {
+            ctx.strokeStyle = layer.color.replace('rgb', 'rgba').replace(')', `, ${layer.alpha})`);
+            ctx.lineWidth = layer.width;
+            ctx.lineCap = 'round';
+
+            ctx.beginPath();
+            ctx.moveTo(x1 - perpX * edgeOffset, y1 - perpY * edgeOffset);
+            ctx.lineTo(x2 - perpX * edgeOffset, y2 - perpY * edgeOffset);
+            ctx.stroke();
+        }
+    }
+
+    // Extra bright core for additive blending effect
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = `rgba(255, 255, 255, ${effectiveAlpha * 0.4})`;
+    ctx.lineWidth = 1;
+    ctx.lineCap = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+
+    ctx.globalCompositeOperation = 'source-over';
 }
 
 /**
- * Draw the light bar at bottom with angle indicator
+ * Draw the light bar at bottom with angle indicator and spectral rainbow
  */
 function drawLightBar() {
     const { x, y, width, height, angle } = lightBar;
 
-    // Main bar
+    // Main bar with prismatic rainbow gradient
     const barGradient = ctx.createLinearGradient(x - width / 2, y, x + width / 2, y);
-    barGradient.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
-    barGradient.addColorStop(0.5, 'rgba(255, 255, 255, 1.0)');
-    barGradient.addColorStop(1, 'rgba(255, 255, 255, 0.3)');
+    barGradient.addColorStop(0, 'rgba(255, 50, 50, 0.8)');      // Red
+    barGradient.addColorStop(0.17, 'rgba(255, 140, 0, 0.9)');   // Orange
+    barGradient.addColorStop(0.33, 'rgba(255, 230, 0, 1.0)');   // Yellow
+    barGradient.addColorStop(0.5, 'rgba(50, 255, 100, 1.0)');   // Green (center, brightest)
+    barGradient.addColorStop(0.67, 'rgba(0, 200, 255, 1.0)');   // Cyan
+    barGradient.addColorStop(0.83, 'rgba(50, 100, 255, 0.9)');  // Blue
+    barGradient.addColorStop(1, 'rgba(180, 50, 255, 0.8)');     // Violet
 
     ctx.fillStyle = barGradient;
     ctx.fillRect(x - width / 2, y - height / 2, width, height);
 
-    // Glow around bar
-    ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
-    ctx.shadowBlur = 20;
+    // Enhanced spectral glow around bar
+    ctx.shadowColor = 'rgba(255, 255, 255, 1.0)';
+    ctx.shadowBlur = 30;
     ctx.fillRect(x - width / 2, y - height / 2, width, height);
     ctx.shadowBlur = 0;
+
+    // Additional outer glow layers for brightness
+    for (let i = 0; i < 3; i++) {
+        const glowSize = 20 + i * 15;
+        const glowAlpha = 0.2 - i * 0.06;
+
+        ctx.fillStyle = `rgba(255, 255, 255, ${glowAlpha})`;
+        ctx.fillRect(
+            x - width / 2 - glowSize / 2,
+            y - height / 2 - glowSize / 2,
+            width + glowSize,
+            height + glowSize
+        );
+    }
 
     // Angle indicator - arc showing direction
     const indicatorRadius = 40;
@@ -564,24 +722,30 @@ function drawLightBar() {
 
     ctx.beginPath();
     ctx.arc(x, y, indicatorRadius, Math.PI, 0, false);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // Direction arrow
+    // Direction arrow with spectral color
     const arrowLength = 35;
     const arrowX = x + Math.cos(angleRad) * arrowLength;
     const arrowY = y - Math.sin(angleRad) * arrowLength;
 
+    // Arrow with gradient based on angle
+    const arrowHue = (angle / 180) * 360;
+    const arrowGradient = ctx.createLinearGradient(x, y, arrowX, arrowY);
+    arrowGradient.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+    arrowGradient.addColorStop(1, `hsla(${arrowHue}, 80%, 70%, 0.9)`);
+
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(arrowX, arrowY);
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = arrowGradient;
+    ctx.lineWidth = 3;
     ctx.stroke();
 
-    // Arrow head
-    const headSize = 8;
+    // Arrow head with glow
+    const headSize = 10;
     const headAngle = Math.PI / 6;
 
     ctx.beginPath();
@@ -595,39 +759,42 @@ function drawLightBar() {
         arrowX - Math.cos(angleRad + headAngle) * headSize,
         arrowY + Math.sin(angleRad + headAngle) * headSize
     );
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = `hsla(${arrowHue}, 90%, 75%, 1.0)`;
+    ctx.lineWidth = 2.5;
     ctx.stroke();
 
-    // Angle markers
+    // Angle markers with spectral colors
     for (let i = 0; i <= 180; i += 30) {
         const markerAngle = i * (Math.PI / 180);
         const innerR = indicatorRadius - 5;
         const outerR = indicatorRadius + 5;
+        const markerHue = (i / 180) * 360;
 
         ctx.beginPath();
         ctx.moveTo(x + Math.cos(markerAngle) * innerR, y - Math.sin(markerAngle) * innerR);
         ctx.lineTo(x + Math.cos(markerAngle) * outerR, y - Math.sin(markerAngle) * outerR);
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = `hsla(${markerHue}, 80%, 65%, 0.5)`;
+        ctx.lineWidth = 1.5;
         ctx.stroke();
     }
 }
 
 /**
- * Main render function
+ * Main render function - Pure black background with prismatic light
  */
 function render(time) {
-    // Clear canvas with pure black
+    // Clear canvas with PURE BLACK - no gradients, no noise
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-    // Draw glass blocks with subtle animation
+    // Draw glass blocks with iridescent animation
     for (const block of glassBlocks) {
         drawGlassBlock(block, time);
     }
 
-    // Draw beams with smooth transition
+    // Draw beams with smooth transition and additive blending for brightness
+    ctx.globalCompositeOperation = 'lighter'; // Additive blending for overlapping colors
+
     if (beamTransition < 1.0) {
         // Fade out old beams
         for (const beam of previousBeams) {
@@ -649,7 +816,9 @@ function render(time) {
         }
     }
 
-    // Draw light bar
+    ctx.globalCompositeOperation = 'source-over'; // Reset blending
+
+    // Draw light bar with spectral gradient
     drawLightBar();
 }
 

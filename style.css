@@ -100,30 +100,4 @@ body {
     }
 }
 
-/* Vignette effect (optional overlay) */
-body::before {
-    content: '';
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    background: radial-gradient(
-        ellipse at center,
-        transparent 0%,
-        transparent 50%,
-        rgba(0, 0, 0, 0.4) 100%
-    );
-    z-index: 5;
-    animation: vignettePulse 8s ease-in-out infinite;
-}
-
-@keyframes vignettePulse {
-    0%, 100% {
-        opacity: 0.6;
-    }
-    50% {
-        opacity: 0.8;
-    }
-}
+/* Removed vignette for pure black background */
