@@ -3,17 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive Kaleidoscope</title>
+    <title>Light Refraction Experience</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Canvas element for rendering the kaleidoscope -->
-    <canvas id="kaleidoscope"></canvas>
+    <!-- Main canvas for rendering the light refraction scene -->
+    <canvas id="refractionCanvas"></canvas>
 
-    <!-- Instructions overlay -->
-    <div class="instructions">
-        <p>Click and drag to rotate the kaleidoscope</p>
-        <p class="hint">Pattern changes every 10°</p>
+    <!-- UI overlay for instructions -->
+    <div class="ui-overlay">
+        <div class="instructions">
+            <p>Drag the light bar to change beam angle</p>
+            <p class="hint">Watch the light refract through glass</p>
+        </div>
+        <div class="angle-display">
+            <span id="angleValue">0°</span>
+        </div>
     </div>
 
     <script src="script.js"></script>

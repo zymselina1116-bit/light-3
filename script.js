@@ -1,177 +1,741 @@
 /**
- * Interactive Kaleidoscope Experience
+ * Light Refraction Experience
  *
- * Main Features:
- * - Smooth continuous rotation via mouse drag
- * - Pattern changes every 10 degrees of rotation
- * - Liquid, glowing, watery visual effects
- * - 60fps animation loop
+ * Architecture:
+ * 1. Glass Blocks: Generate dense field of 3D-like polygonal glass volumes
+ * 2. Light Bar: Interactive horizontal bar at bottom for angle control
+ * 3. Ray Casting: Emit beams from bar, trace through glass blocks
+ * 4. Refraction: Compute bent paths when rays intersect glass
+ * 5. Rendering: Draw glass blocks, beams with glow, smooth transitions
  */
 
 // ============================================================================
-// GLOBAL STATE
+// GLOBAL STATE AND CONFIGURATION
 // ============================================================================
 
-const canvas = document.getElementById('kaleidoscope');
+const canvas = document.getElementById('refractionCanvas');
 const ctx = canvas.getContext('2d');
+const angleDisplay = document.getElementById('angleValue');
 
-// Rotation state
-let totalRotation = 0;           // Total accumulated rotation in degrees
-let currentRotation = 0;         // Current visual rotation angle
-let lastPatternThreshold = 0;    // Last 10-degree threshold crossed
+// Canvas dimensions
+let canvasWidth = 0;
+let canvasHeight = 0;
 
-// Mouse/drag state
+// Glass blocks configuration
+const GLASS_BLOCK_COUNT = 80; // Dense field for complex refractions
+const glassBlocks = [];
+
+// Light bar configuration
+const lightBar = {
+    x: 0,           // Center X position
+    y: 0,           // Y position (near bottom)
+    width: 200,     // Bar width
+    height: 8,      // Bar height
+    angle: 90,      // Emission angle in degrees (90 = straight up)
+    targetAngle: 90,
+    angleVelocity: 0
+};
+
+// Interaction state
 let isDragging = false;
-let lastMouseX = 0;
-let lastMouseY = 0;
+let dragStartX = 0;
 let dragStartAngle = 0;
 
-// Pattern configuration (changes every 10 degrees)
-let pattern = generateNewPattern();
+// Beam paths (computed from ray tracing)
+let currentBeams = [];
+let previousBeams = [];
+let beamTransition = 1.0; // 0 = previous, 1 = current
 
-// Animation time for flicker effects
+// Animation time
 let animationTime = 0;
 
+// Performance optimization
+const MAX_BOUNCES = 6; // Maximum refractions per ray
+const RAY_COUNT = 5;   // Number of initial rays to cast
+
 // ============================================================================
-// CANVAS SETUP AND RESIZE
+// INITIALIZATION
 // ============================================================================
 
-function resizeCanvas() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+function init() {
+    resizeCanvas();
+    generateGlassBlocks();
+    computeBeams();
+    animate(0);
 }
 
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
+function resizeCanvas() {
+    canvasWidth = window.innerWidth;
+    canvasHeight = window.innerHeight;
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+
+    // Position light bar at bottom center
+    lightBar.x = canvasWidth / 2;
+    lightBar.y = canvasHeight - 100;
+}
+
+window.addEventListener('resize', () => {
+    resizeCanvas();
+    generateGlassBlocks();
+    computeBeams();
+});
 
 // ============================================================================
-// PATTERN GENERATION
+// GLASS BLOCK GENERATION
 // ============================================================================
 
 /**
- * Generates a new random pattern configuration
- * Called whenever rotation crosses a 10-degree threshold
+ * Generate a dense field of 3D-like glass blocks in the top half
+ * Each block is an irregular polygon with depth information
  */
-function generateNewPattern() {
-    // Random number of symmetry segments (4-12 for good kaleidoscope effect)
-    const segments = Math.floor(Math.random() * 9) + 4;
+function generateGlassBlocks() {
+    glassBlocks.length = 0;
 
-    // Color palette - generate 3-5 complementary colors
-    const hueBase = Math.random() * 360;
-    const colorCount = Math.floor(Math.random() * 3) + 3;
-    const colors = [];
+    for (let i = 0; i < GLASS_BLOCK_COUNT; i++) {
+        // Position in top 60% of screen
+        const x = Math.random() * canvasWidth;
+        const y = Math.random() * canvasHeight * 0.6;
 
-    for (let i = 0; i < colorCount; i++) {
-        const hue = (hueBase + (i * 360 / colorCount)) % 360;
-        const saturation = 60 + Math.random() * 40;
-        const lightness = 50 + Math.random() * 30;
-        colors.push({ h: hue, s: saturation, l: lightness });
+        // Size based on depth (larger = closer)
+        const depth = Math.random();
+        const size = 30 + depth * 80;
+
+        // Generate irregular polygon (4-7 sides)
+        const sides = Math.floor(Math.random() * 4) + 4;
+        const vertices = [];
+        const angleStep = (Math.PI * 2) / sides;
+
+        for (let j = 0; j < sides; j++) {
+            const angle = angleStep * j + Math.random() * 0.3;
+            const radius = size * (0.7 + Math.random() * 0.3);
+            vertices.push({
+                x: x + Math.cos(angle) * radius,
+                y: y + Math.sin(angle) * radius
+            });
+        }
+
+        // Opacity and blur based on depth
+        const opacity = 0.15 + depth * 0.25;
+        const blur = (1 - depth) * 3;
+
+        glassBlocks.push({
+            x,
+            y,
+            size,
+            vertices,
+            depth,
+            opacity,
+            blur,
+            rotation: Math.random() * Math.PI * 2,
+            rotationSpeed: (Math.random() - 0.5) * 0.001,
+            pulseOffset: Math.random() * Math.PI * 2
+        });
     }
 
-    // Shape configuration
-    const shapeTypes = ['circles', 'petals', 'polygons', 'spirals', 'stars'];
-    const shapeType = shapeTypes[Math.floor(Math.random() * shapeTypes.length)];
+    // Sort by depth (furthest first for proper rendering)
+    glassBlocks.sort((a, b) => a.depth - b.depth);
+}
 
-    // Pattern density (how many shapes per segment)
-    const density = Math.floor(Math.random() * 5) + 3;
+/**
+ * Calculate the center point of a polygon
+ */
+function getPolygonCenter(vertices) {
+    let sumX = 0, sumY = 0;
+    for (const v of vertices) {
+        sumX += v.x;
+        sumY += v.y;
+    }
+    return { x: sumX / vertices.length, y: sumY / vertices.length };
+}
 
-    // Layer count for depth
-    const layers = Math.floor(Math.random() * 3) + 2;
+/**
+ * Check if a point is inside a polygon
+ */
+function pointInPolygon(x, y, vertices) {
+    let inside = false;
+    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+        const xi = vertices[i].x, yi = vertices[i].y;
+        const xj = vertices[j].x, yj = vertices[j].y;
 
+        const intersect = ((yi > y) !== (yj > y)) &&
+            (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+/**
+ * Find intersection point between line segment and polygon edge
+ */
+function lineSegmentIntersection(x1, y1, x2, y2, x3, y3, x4, y4) {
+    const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (Math.abs(denom) < 0.0001) return null;
+
+    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+    const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom;
+
+    if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        return {
+            x: x1 + t * (x2 - x1),
+            y: y1 + t * (y2 - y1),
+            t: t
+        };
+    }
+    return null;
+}
+
+/**
+ * Find where a ray intersects a glass block
+ */
+function findRayIntersection(rayStart, rayDir, block) {
+    const vertices = block.vertices;
+    let closestIntersection = null;
+    let closestDistance = Infinity;
+    let intersectionEdge = null;
+
+    // Check intersection with each edge
+    for (let i = 0; i < vertices.length; i++) {
+        const v1 = vertices[i];
+        const v2 = vertices[(i + 1) % vertices.length];
+
+        // Cast ray far into the scene
+        const rayEnd = {
+            x: rayStart.x + rayDir.x * 10000,
+            y: rayStart.y + rayDir.y * 10000
+        };
+
+        const intersection = lineSegmentIntersection(
+            rayStart.x, rayStart.y,
+            rayEnd.x, rayEnd.y,
+            v1.x, v1.y,
+            v2.x, v2.y
+        );
+
+        if (intersection) {
+            const dist = Math.hypot(
+                intersection.x - rayStart.x,
+                intersection.y - rayStart.y
+            );
+
+            if (dist < closestDistance && dist > 0.1) {
+                closestDistance = dist;
+                closestIntersection = intersection;
+                intersectionEdge = { v1, v2, index: i };
+            }
+        }
+    }
+
+    if (closestIntersection && intersectionEdge) {
+        // Calculate edge normal
+        const edgeX = intersectionEdge.v2.x - intersectionEdge.v1.x;
+        const edgeY = intersectionEdge.v2.y - intersectionEdge.v1.y;
+        const edgeLength = Math.hypot(edgeX, edgeY);
+
+        // Normal perpendicular to edge (pointing inward)
+        let normalX = -edgeY / edgeLength;
+        let normalY = edgeX / edgeLength;
+
+        // Ensure normal points toward polygon center
+        const center = getPolygonCenter(vertices);
+        const toCenter = {
+            x: center.x - closestIntersection.x,
+            y: center.y - closestIntersection.y
+        };
+
+        if (normalX * toCenter.x + normalY * toCenter.y < 0) {
+            normalX = -normalX;
+            normalY = -normalY;
+        }
+
+        return {
+            point: closestIntersection,
+            normal: { x: normalX, y: normalY },
+            distance: closestDistance
+        };
+    }
+
+    return null;
+}
+
+// ============================================================================
+// RAY TRACING AND REFRACTION
+// ============================================================================
+
+/**
+ * Compute refracted ray direction using simplified Snell's law
+ */
+function refractRay(incident, normal, entering) {
+    // Simplified refraction: bend ray based on angle of incidence
+    const incidentDot = incident.x * normal.x + incident.y * normal.y;
+
+    // Refraction index (glass ~1.5)
+    const eta = entering ? 1.0 / 1.5 : 1.5 / 1.0;
+
+    const k = 1 - eta * eta * (1 - incidentDot * incidentDot);
+
+    if (k < 0) {
+        // Total internal reflection
+        return {
+            x: incident.x - 2 * incidentDot * normal.x,
+            y: incident.y - 2 * incidentDot * normal.y
+        };
+    }
+
+    // Refracted direction
+    const refracted = {
+        x: eta * incident.x + (eta * incidentDot - Math.sqrt(k)) * normal.x,
+        y: eta * incident.y + (eta * incidentDot - Math.sqrt(k)) * normal.y
+    };
+
+    // Normalize
+    const length = Math.hypot(refracted.x, refracted.y);
     return {
-        segments,
-        colors,
-        shapeType,
-        density,
-        layers,
-        // Random offsets for variation
-        offsetAngle: Math.random() * Math.PI * 2,
-        scaleVariation: 0.5 + Math.random() * 0.5
+        x: refracted.x / length,
+        y: refracted.y / length
     };
 }
 
+/**
+ * Trace a single ray through the glass field
+ */
+function traceRay(startX, startY, dirX, dirY, depth = 0) {
+    if (depth >= MAX_BOUNCES) return [];
+
+    const segments = [];
+    const rayStart = { x: startX, y: startY };
+    const rayDir = { x: dirX, y: dirY };
+
+    // Find closest intersection with any glass block
+    let closestBlock = null;
+    let closestIntersection = null;
+    let closestDistance = Infinity;
+
+    for (const block of glassBlocks) {
+        const intersection = findRayIntersection(rayStart, rayDir, block);
+        if (intersection && intersection.distance < closestDistance) {
+            closestDistance = intersection.distance;
+            closestIntersection = intersection;
+            closestBlock = block;
+        }
+    }
+
+    if (closestIntersection && closestBlock) {
+        // Add segment from ray start to intersection
+        segments.push({
+            x1: rayStart.x,
+            y1: rayStart.y,
+            x2: closestIntersection.point.x,
+            y2: closestIntersection.point.y,
+            intensity: 1.0 / (depth + 1)
+        });
+
+        // Compute refracted direction (entering glass)
+        const refractedDir = refractRay(
+            rayDir,
+            closestIntersection.normal,
+            true
+        );
+
+        // Continue ray from inside the glass block
+        // Find exit point
+        const exitIntersection = findRayIntersection(
+            { x: closestIntersection.point.x + refractedDir.x * 0.1, y: closestIntersection.point.y + refractedDir.y * 0.1 },
+            refractedDir,
+            closestBlock
+        );
+
+        if (exitIntersection) {
+            // Segment inside glass (slightly dimmer)
+            segments.push({
+                x1: closestIntersection.point.x,
+                y1: closestIntersection.point.y,
+                x2: exitIntersection.point.x,
+                y2: exitIntersection.point.y,
+                intensity: 0.6 / (depth + 1),
+                insideGlass: true
+            });
+
+            // Refract again when exiting
+            const exitDir = refractRay(
+                refractedDir,
+                { x: -exitIntersection.normal.x, y: -exitIntersection.normal.y },
+                false
+            );
+
+            // Continue tracing from exit point
+            const furtherSegments = traceRay(
+                exitIntersection.point.x,
+                exitIntersection.point.y,
+                exitDir.x,
+                exitDir.y,
+                depth + 1
+            );
+
+            segments.push(...furtherSegments);
+        }
+    } else {
+        // No intersection - ray goes to top of screen
+        const endY = 0;
+        const t = (endY - rayStart.y) / rayDir.y;
+        const endX = rayStart.x + rayDir.x * t;
+
+        if (t > 0) {
+            segments.push({
+                x1: rayStart.x,
+                y1: rayStart.y,
+                x2: endX,
+                y2: endY,
+                intensity: 1.0 / (depth + 1)
+            });
+        }
+    }
+
+    return segments;
+}
+
+/**
+ * Compute all beam paths from the light bar at current angle
+ */
+function computeBeams() {
+    const beams = [];
+    const angleRad = lightBar.angle * (Math.PI / 180);
+
+    // Cast multiple rays with slight angle variations for richer patterns
+    for (let i = 0; i < RAY_COUNT; i++) {
+        const spreadAngle = ((i - RAY_COUNT / 2) / RAY_COUNT) * 20 * (Math.PI / 180);
+        const rayAngle = angleRad + spreadAngle;
+
+        const dirX = Math.cos(rayAngle);
+        const dirY = -Math.sin(rayAngle);
+
+        // Trace ray through the scene
+        const segments = traceRay(
+            lightBar.x + ((i - RAY_COUNT / 2) / RAY_COUNT) * lightBar.width * 0.8,
+            lightBar.y,
+            dirX,
+            dirY
+        );
+
+        beams.push(...segments);
+    }
+
+    return beams;
+}
+
+/**
+ * Update beam paths when angle changes
+ */
+function updateBeams() {
+    // Store previous beams for smooth transition
+    previousBeams = [...currentBeams];
+    currentBeams = computeBeams();
+    beamTransition = 0; // Start transition
+}
+
 // ============================================================================
-// MOUSE/TOUCH EVENT HANDLERS
+// RENDERING
 // ============================================================================
 
 /**
- * Calculate angle from center of canvas to mouse position
+ * Draw a single glass block with 3D effect
  */
-function getAngleFromCenter(x, y) {
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-    return Math.atan2(y - centerY, x - centerX) * (180 / Math.PI);
+function drawGlassBlock(block, time) {
+    const { vertices, opacity, blur, depth, pulseOffset } = block;
+
+    // Subtle pulsing opacity
+    const pulseOpacity = opacity * (0.9 + 0.1 * Math.sin(time * 0.5 + pulseOffset));
+
+    ctx.save();
+
+    // Apply blur for depth effect
+    if (blur > 0) {
+        ctx.filter = `blur(${blur}px)`;
+    }
+
+    // Draw filled polygon
+    ctx.beginPath();
+    for (let i = 0; i < vertices.length; i++) {
+        const v = vertices[i];
+        if (i === 0) ctx.moveTo(v.x, v.y);
+        else ctx.lineTo(v.x, v.y);
+    }
+    ctx.closePath();
+
+    // Fill with subtle gradient
+    const center = getPolygonCenter(vertices);
+    const gradient = ctx.createRadialGradient(
+        center.x, center.y, 0,
+        center.x, center.y, block.size
+    );
+
+    gradient.addColorStop(0, `rgba(255, 255, 255, ${pulseOpacity * 0.4})`);
+    gradient.addColorStop(0.7, `rgba(255, 255, 255, ${pulseOpacity * 0.2})`);
+    gradient.addColorStop(1, `rgba(255, 255, 255, ${pulseOpacity * 0.05})`);
+
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // Draw edge outline
+    ctx.strokeStyle = `rgba(255, 255, 255, ${pulseOpacity * 0.6})`;
+    ctx.lineWidth = 1 + depth * 1.5;
+    ctx.stroke();
+
+    // Inner highlight for glassy effect
+    ctx.beginPath();
+    const highlightOffset = block.size * 0.2;
+    ctx.moveTo(vertices[0].x, vertices[0].y);
+    for (let i = 1; i < vertices.length; i++) {
+        const v = vertices[i];
+        const vNext = vertices[(i + 1) % vertices.length];
+        const midX = (v.x + vNext.x) / 2;
+        const midY = (v.y + vNext.y) / 2;
+        const toCenter = { x: center.x - midX, y: center.y - midY };
+        const length = Math.hypot(toCenter.x, toCenter.y);
+
+        if (length > 0) {
+            const offsetX = (toCenter.x / length) * highlightOffset;
+            const offsetY = (toCenter.y / length) * highlightOffset;
+            ctx.lineTo(midX + offsetX, midY + offsetY);
+        }
+    }
+    ctx.closePath();
+    ctx.strokeStyle = `rgba(255, 255, 255, ${pulseOpacity * 0.3})`;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+/**
+ * Draw a beam segment with glow effect
+ */
+function drawBeam(segment, alpha = 1.0) {
+    const { x1, y1, x2, y2, intensity, insideGlass } = segment;
+
+    const effectiveAlpha = alpha * intensity;
+
+    // Multiple passes for glow effect
+    const glowLayers = [
+        { width: 12, alpha: effectiveAlpha * 0.1 },
+        { width: 6, alpha: effectiveAlpha * 0.3 },
+        { width: 3, alpha: effectiveAlpha * 0.6 },
+        { width: 1, alpha: effectiveAlpha * 1.0 }
+    ];
+
+    for (const layer of glowLayers) {
+        ctx.strokeStyle = insideGlass
+            ? `rgba(200, 200, 255, ${layer.alpha})`
+            : `rgba(255, 255, 255, ${layer.alpha})`;
+        ctx.lineWidth = layer.width;
+        ctx.lineCap = 'round';
+
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+    }
+}
+
+/**
+ * Draw the light bar at bottom with angle indicator
+ */
+function drawLightBar() {
+    const { x, y, width, height, angle } = lightBar;
+
+    // Main bar
+    const barGradient = ctx.createLinearGradient(x - width / 2, y, x + width / 2, y);
+    barGradient.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
+    barGradient.addColorStop(0.5, 'rgba(255, 255, 255, 1.0)');
+    barGradient.addColorStop(1, 'rgba(255, 255, 255, 0.3)');
+
+    ctx.fillStyle = barGradient;
+    ctx.fillRect(x - width / 2, y - height / 2, width, height);
+
+    // Glow around bar
+    ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
+    ctx.shadowBlur = 20;
+    ctx.fillRect(x - width / 2, y - height / 2, width, height);
+    ctx.shadowBlur = 0;
+
+    // Angle indicator - arc showing direction
+    const indicatorRadius = 40;
+    const angleRad = angle * (Math.PI / 180);
+
+    ctx.beginPath();
+    ctx.arc(x, y, indicatorRadius, Math.PI, 0, false);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Direction arrow
+    const arrowLength = 35;
+    const arrowX = x + Math.cos(angleRad) * arrowLength;
+    const arrowY = y - Math.sin(angleRad) * arrowLength;
+
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(arrowX, arrowY);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Arrow head
+    const headSize = 8;
+    const headAngle = Math.PI / 6;
+
+    ctx.beginPath();
+    ctx.moveTo(arrowX, arrowY);
+    ctx.lineTo(
+        arrowX - Math.cos(angleRad - headAngle) * headSize,
+        arrowY + Math.sin(angleRad - headAngle) * headSize
+    );
+    ctx.moveTo(arrowX, arrowY);
+    ctx.lineTo(
+        arrowX - Math.cos(angleRad + headAngle) * headSize,
+        arrowY + Math.sin(angleRad + headAngle) * headSize
+    );
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Angle markers
+    for (let i = 0; i <= 180; i += 30) {
+        const markerAngle = i * (Math.PI / 180);
+        const innerR = indicatorRadius - 5;
+        const outerR = indicatorRadius + 5;
+
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(markerAngle) * innerR, y - Math.sin(markerAngle) * innerR);
+        ctx.lineTo(x + Math.cos(markerAngle) * outerR, y - Math.sin(markerAngle) * outerR);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+}
+
+/**
+ * Main render function
+ */
+function render(time) {
+    // Clear canvas with pure black
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+
+    // Draw glass blocks with subtle animation
+    for (const block of glassBlocks) {
+        drawGlassBlock(block, time);
+    }
+
+    // Draw beams with smooth transition
+    if (beamTransition < 1.0) {
+        // Fade out old beams
+        for (const beam of previousBeams) {
+            drawBeam(beam, 1.0 - beamTransition);
+        }
+
+        // Fade in new beams
+        for (const beam of currentBeams) {
+            drawBeam(beam, beamTransition);
+        }
+
+        // Progress transition
+        beamTransition += 0.05;
+        if (beamTransition > 1.0) beamTransition = 1.0;
+    } else {
+        // Draw current beams at full opacity
+        for (const beam of currentBeams) {
+            drawBeam(beam, 1.0);
+        }
+    }
+
+    // Draw light bar
+    drawLightBar();
+}
+
+// ============================================================================
+// INTERACTION HANDLERS
+// ============================================================================
+
+function isOverLightBar(x, y) {
+    return Math.abs(x - lightBar.x) < lightBar.width / 2 + 50 &&
+           Math.abs(y - lightBar.y) < 50;
 }
 
 canvas.addEventListener('mousedown', (e) => {
-    isDragging = true;
-    lastMouseX = e.clientX;
-    lastMouseY = e.clientY;
-    dragStartAngle = getAngleFromCenter(e.clientX, e.clientY);
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (isOverLightBar(x, y)) {
+        isDragging = true;
+        dragStartX = x;
+        dragStartAngle = lightBar.angle;
+        canvas.style.cursor = 'grabbing';
+    }
 });
 
 canvas.addEventListener('mousemove', (e) => {
-    if (!isDragging) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
 
-    // Calculate rotation based on angular movement around center
-    const currentAngle = getAngleFromCenter(e.clientX, e.clientY);
-    let angleDelta = currentAngle - dragStartAngle;
+    if (isDragging) {
+        // Map horizontal drag to angle change
+        const dragDelta = x - dragStartX;
+        const angleDelta = dragDelta * 0.3; // Sensitivity
 
-    // Handle angle wraparound
-    if (angleDelta > 180) angleDelta -= 360;
-    if (angleDelta < -180) angleDelta += 360;
+        lightBar.targetAngle = dragStartAngle + angleDelta;
+        lightBar.targetAngle = Math.max(0, Math.min(180, lightBar.targetAngle));
 
-    // Update total rotation
-    totalRotation += angleDelta;
-
-    // Check if we crossed a 10-degree threshold
-    const currentThreshold = Math.floor(totalRotation / 10) * 10;
-    if (currentThreshold !== lastPatternThreshold) {
-        lastPatternThreshold = currentThreshold;
-        pattern = generateNewPattern();
+        // Update angle display
+        angleDisplay.textContent = Math.round(lightBar.targetAngle) + '°';
+    } else {
+        // Change cursor when over light bar
+        canvas.style.cursor = isOverLightBar(x, y) ? 'grab' : 'crosshair';
     }
-
-    dragStartAngle = currentAngle;
 });
 
 canvas.addEventListener('mouseup', () => {
     isDragging = false;
+    canvas.style.cursor = 'crosshair';
 });
 
 canvas.addEventListener('mouseleave', () => {
     isDragging = false;
+    canvas.style.cursor = 'crosshair';
 });
 
-// Touch support for mobile
+// Touch support
 canvas.addEventListener('touchstart', (e) => {
     e.preventDefault();
     const touch = e.touches[0];
-    isDragging = true;
-    lastMouseX = touch.clientX;
-    lastMouseY = touch.clientY;
-    dragStartAngle = getAngleFromCenter(touch.clientX, touch.clientY);
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+
+    if (isOverLightBar(x, y)) {
+        isDragging = true;
+        dragStartX = x;
+        dragStartAngle = lightBar.angle;
+    }
 });
 
 canvas.addEventListener('touchmove', (e) => {
     e.preventDefault();
-    if (!isDragging) return;
+    if (isDragging) {
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
 
-    const touch = e.touches[0];
-    const currentAngle = getAngleFromCenter(touch.clientX, touch.clientY);
-    let angleDelta = currentAngle - dragStartAngle;
+        const dragDelta = x - dragStartX;
+        const angleDelta = dragDelta * 0.3;
 
-    if (angleDelta > 180) angleDelta -= 360;
-    if (angleDelta < -180) angleDelta += 360;
+        lightBar.targetAngle = dragStartAngle + angleDelta;
+        lightBar.targetAngle = Math.max(0, Math.min(180, lightBar.targetAngle));
 
-    totalRotation += angleDelta;
-
-    const currentThreshold = Math.floor(totalRotation / 10) * 10;
-    if (currentThreshold !== lastPatternThreshold) {
-        lastPatternThreshold = currentThreshold;
-        pattern = generateNewPattern();
+        angleDisplay.textContent = Math.round(lightBar.targetAngle) + '°';
     }
-
-    dragStartAngle = currentAngle;
 });
 
 canvas.addEventListener('touchend', (e) => {
@@ -180,242 +744,33 @@ canvas.addEventListener('touchend', (e) => {
 });
 
 // ============================================================================
-// DRAWING UTILITIES
-// ============================================================================
-
-/**
- * Convert HSL color to CSS string with alpha
- */
-function hslToString(color, alpha = 1) {
-    return `hsla(${color.h}, ${color.s}%, ${color.l}%, ${alpha})`;
-}
-
-/**
- * Draw a single shape with glowing, watery effect
- */
-function drawShape(x, y, size, color, shapeType, time) {
-    ctx.save();
-    ctx.translate(x, y);
-
-    // Subtle flicker effect
-    const flicker = 0.85 + Math.sin(time * 2 + x * 0.01 + y * 0.01) * 0.15;
-    const alpha = 0.3 + Math.sin(time * 3 + x * 0.02) * 0.2;
-
-    // Outer glow
-    const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, size * 1.5);
-    gradient.addColorStop(0, hslToString(color, alpha * flicker * 0.6));
-    gradient.addColorStop(0.5, hslToString(color, alpha * flicker * 0.3));
-    gradient.addColorStop(1, hslToString(color, 0));
-
-    ctx.fillStyle = gradient;
-
-    switch (shapeType) {
-        case 'circles':
-            ctx.beginPath();
-            ctx.arc(0, 0, size, 0, Math.PI * 2);
-            ctx.fill();
-            break;
-
-        case 'petals':
-            // Draw petal shape
-            ctx.beginPath();
-            for (let i = 0; i < 5; i++) {
-                const angle = (i / 5) * Math.PI * 2;
-                const r = size * (0.5 + 0.5 * Math.sin(angle * 2.5));
-                const px = Math.cos(angle) * r;
-                const py = Math.sin(angle) * r;
-                if (i === 0) ctx.moveTo(px, py);
-                else ctx.lineTo(px, py);
-            }
-            ctx.closePath();
-            ctx.fill();
-            break;
-
-        case 'polygons':
-            // Draw hexagon
-            ctx.beginPath();
-            for (let i = 0; i < 6; i++) {
-                const angle = (i / 6) * Math.PI * 2;
-                const px = Math.cos(angle) * size;
-                const py = Math.sin(angle) * size;
-                if (i === 0) ctx.moveTo(px, py);
-                else ctx.lineTo(px, py);
-            }
-            ctx.closePath();
-            ctx.fill();
-            break;
-
-        case 'spirals':
-            // Draw spiral-like shape
-            ctx.beginPath();
-            for (let i = 0; i <= 20; i++) {
-                const angle = (i / 20) * Math.PI * 4;
-                const r = size * (i / 20);
-                const px = Math.cos(angle) * r;
-                const py = Math.sin(angle) * r;
-                if (i === 0) ctx.moveTo(px, py);
-                else ctx.lineTo(px, py);
-            }
-            ctx.lineWidth = size * 0.3;
-            ctx.strokeStyle = hslToString(color, alpha * flicker);
-            ctx.stroke();
-            ctx.fill();
-            break;
-
-        case 'stars':
-            // Draw star shape
-            ctx.beginPath();
-            for (let i = 0; i < 10; i++) {
-                const angle = (i / 10) * Math.PI * 2;
-                const r = size * (i % 2 === 0 ? 1 : 0.5);
-                const px = Math.cos(angle) * r;
-                const py = Math.sin(angle) * r;
-                if (i === 0) ctx.moveTo(px, py);
-                else ctx.lineTo(px, py);
-            }
-            ctx.closePath();
-            ctx.fill();
-            break;
-    }
-
-    ctx.restore();
-}
-
-/**
- * Draw shapes in a single segment (will be mirrored)
- */
-function drawSegmentPattern(centerX, centerY, radius, time) {
-    const { colors, shapeType, density, layers, offsetAngle, scaleVariation } = pattern;
-
-    // Draw multiple layers for depth
-    for (let layer = 0; layer < layers; layer++) {
-        const layerRadius = radius * (0.3 + (layer / layers) * 0.7);
-
-        // Draw shapes in this layer
-        for (let i = 0; i < density; i++) {
-            // Position along the radius
-            const t = (i / density);
-            const r = layerRadius * t;
-
-            // Angle offset for variation
-            const angleOffset = offsetAngle + layer * 0.3 + t * 0.5;
-            const x = centerX + Math.cos(angleOffset) * r;
-            const y = centerY + Math.sin(angleOffset) * r;
-
-            // Size variation
-            const size = (15 + t * 30) * scaleVariation * (0.8 + layer * 0.3);
-
-            // Color from palette
-            const colorIndex = (i + layer) % colors.length;
-            const color = colors[colorIndex];
-
-            drawShape(x, y, size, color, shapeType, time + layer * 0.5);
-        }
-    }
-}
-
-/**
- * Draw the complete kaleidoscope with mirrored segments
- */
-function drawKaleidoscope() {
-    const centerX = canvas.width / 2;
-    const centerY = canvas.height / 2;
-    const radius = Math.min(canvas.width, canvas.height) * 0.4;
-
-    // Smooth rotation update
-    currentRotation = totalRotation;
-
-    // Draw each mirrored segment
-    for (let i = 0; i < pattern.segments; i++) {
-        const segmentAngle = (360 / pattern.segments);
-        const angle = (currentRotation + i * segmentAngle) * (Math.PI / 180);
-
-        ctx.save();
-        ctx.translate(centerX, centerY);
-        ctx.rotate(angle);
-
-        // Clip to segment
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.arc(0, 0, radius, 0, (Math.PI * 2) / pattern.segments);
-        ctx.closePath();
-        ctx.clip();
-
-        // Draw pattern in this segment
-        drawSegmentPattern(0, 0, radius, animationTime);
-
-        ctx.restore();
-
-        // Draw mirrored version
-        ctx.save();
-        ctx.translate(centerX, centerY);
-        ctx.rotate(angle);
-        ctx.scale(1, -1); // Mirror vertically
-
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.arc(0, 0, radius, 0, (Math.PI * 2) / pattern.segments);
-        ctx.closePath();
-        ctx.clip();
-
-        drawSegmentPattern(0, 0, radius, animationTime);
-
-        ctx.restore();
-    }
-
-    // Draw center glow
-    const centerGlow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius * 0.3);
-    const centerColor = pattern.colors[0];
-    centerGlow.addColorStop(0, hslToString(centerColor, 0.4));
-    centerGlow.addColorStop(0.5, hslToString(centerColor, 0.1));
-    centerGlow.addColorStop(1, 'transparent');
-
-    ctx.fillStyle = centerGlow;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Draw outer ring for definition
-    ctx.strokeStyle = `rgba(255, 255, 255, 0.1)`;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    ctx.stroke();
-}
-
-// ============================================================================
 // ANIMATION LOOP
 // ============================================================================
 
-/**
- * Main animation loop - runs at 60fps
- */
+let lastAngle = lightBar.angle;
+
 function animate(timestamp) {
-    // Update animation time for flicker effects
-    animationTime = timestamp * 0.001; // Convert to seconds
+    animationTime = timestamp * 0.001;
 
-    // Clear canvas with dark background
-    ctx.fillStyle = '#0a0e1a';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Smooth angle interpolation
+    const angleDiff = lightBar.targetAngle - lightBar.angle;
+    lightBar.angle += angleDiff * 0.15; // Smooth damping
 
-    // Add subtle background gradient
-    const bgGradient = ctx.createRadialGradient(
-        canvas.width / 2, canvas.height / 2, 0,
-        canvas.width / 2, canvas.height / 2, Math.max(canvas.width, canvas.height) / 2
-    );
-    bgGradient.addColorStop(0, 'rgba(26, 26, 46, 0.3)');
-    bgGradient.addColorStop(1, 'rgba(10, 14, 26, 0.8)');
-    ctx.fillStyle = bgGradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Check if angle changed significantly
+    if (Math.abs(lightBar.angle - lastAngle) > 0.5) {
+        updateBeams();
+        lastAngle = lightBar.angle;
+    }
 
-    // Draw the kaleidoscope
-    drawKaleidoscope();
+    // Render the scene
+    render(animationTime);
 
     // Continue animation loop
     requestAnimationFrame(animate);
 }
 
 // ============================================================================
-// START THE EXPERIENCE
+// START
 // ============================================================================
 
-// Start animation loop
-requestAnimationFrame(animate);
+init();

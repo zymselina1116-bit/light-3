@@ -1,3 +1,8 @@
+/**
+ * Light Refraction Experience - Styles
+ * Pure black background with white/transparent elements only
+ */
+
 /* Reset and base styles */
 * {
     margin: 0;
@@ -6,43 +11,50 @@
 }
 
 body {
-    /* Dark background for glowing effect */
-    background: linear-gradient(135deg, #0a0e1a 0%, #1a1a2e 50%, #0f0f1e 100%);
+    /* Pure black background - no gradients */
+    background: #000000;
     overflow: hidden;
     width: 100vw;
     height: 100vh;
     display: flex;
     justify-content: center;
     align-items: center;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: 'Courier New', monospace;
+    color: #ffffff;
 }
 
-/* Canvas fills the entire viewport */
-#kaleidoscope {
+/* Canvas fills entire viewport */
+#refractionCanvas {
     display: block;
-    cursor: grab;
     width: 100%;
     height: 100%;
+    cursor: crosshair;
 }
 
-/* Change cursor when actively dragging */
-#kaleidoscope:active {
-    cursor: grabbing;
-}
-
-/* Instructions overlay */
-.instructions {
+/* UI Overlay - non-interactive elements */
+.ui-overlay {
     position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* Instructions at top */
+.instructions {
+    position: absolute;
     top: 30px;
     left: 50%;
     transform: translateX(-50%);
     text-align: center;
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 16px;
-    pointer-events: none;
-    z-index: 10;
-    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
-    animation: fadeInOut 4s ease-in-out infinite;
+    font-size: 14px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    animation: pulse 3s ease-in-out infinite;
 }
 
 .instructions p {
@@ -50,17 +62,68 @@ body {
 }
 
 .instructions .hint {
-    font-size: 14px;
-    color: rgba(100, 200, 255, 0.8);
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
     font-style: italic;
+    text-transform: none;
+    letter-spacing: 0.5px;
 }
 
-/* Fade in/out animation for instructions */
-@keyframes fadeInOut {
+/* Angle display at bottom right */
+.angle-display {
+    position: absolute;
+    bottom: 40px;
+    right: 40px;
+    font-size: 16px;
+    font-weight: bold;
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.05);
+    padding: 10px 20px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    backdrop-filter: blur(10px);
+    letter-spacing: 2px;
+}
+
+#angleValue {
+    color: #ffffff;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+/* Subtle pulse animation */
+@keyframes pulse {
     0%, 100% {
-        opacity: 0.4;
+        opacity: 0.3;
     }
     50% {
-        opacity: 0.9;
+        opacity: 0.7;
+    }
+}
+
+/* Vignette effect (optional overlay) */
+body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    background: radial-gradient(
+        ellipse at center,
+        transparent 0%,
+        transparent 50%,
+        rgba(0, 0, 0, 0.4) 100%
+    );
+    z-index: 5;
+    animation: vignettePulse 8s ease-in-out infinite;
+}
+
+@keyframes vignettePulse {
+    0%, 100% {
+        opacity: 0.6;
+    }
+    50% {
+        opacity: 0.8;
     }
 }
