@@ -33,8 +33,8 @@ const WAVELENGTHS = [
     { name: 'violet',  color: 'rgb(180, 50, 255)',   eta: 1.530, weight: 0.8 }
 ];
 
-// Glass blocks configuration - OPTIMIZED for performance
-const GLASS_BLOCK_COUNT = 45; // Reduced for better performance while maintaining visual richness
+// Glass blocks configuration - Dense field for rich dispersion patterns
+const GLASS_BLOCK_COUNT = 65; // Increased for more complex refraction networks
 const glassBlocks = [];
 
 // Light bar configuration
