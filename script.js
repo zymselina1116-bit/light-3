@@ -52,6 +52,7 @@ const lightBar = {
 let isDragging = false;
 let dragStartX = 0;
 let dragStartAngle = 0;
+let isHoveringLightBar = false; // Track hover state for visual feedback
 
 // Beam paths (computed from ray tracing) - now includes wavelength information
 let currentBeams = [];
@@ -753,24 +754,35 @@ function drawBeam(segment, alpha = 1.0) {
 
 /**
  * Draw the light bar at bottom with angle indicator - PURE WHITE light source
+ * Shows visual feedback when hovering or dragging
  */
 function drawLightBar() {
     const { x, y, width, height, angle } = lightBar;
 
+    // Visual feedback: highlight when hovering or dragging
+    const glowIntensity = isDragging ? 1.5 : (isHoveringLightBar ? 1.2 : 1.0);
+
     // Main bar with PURE WHITE gradient (bright center, fading edges)
     const barGradient = ctx.createLinearGradient(x - width / 2, y, x + width / 2, y);
-    barGradient.addColorStop(0, 'rgba(255, 255, 255, 0.6)');
-    barGradient.addColorStop(0.5, 'rgba(255, 255, 255, 1.0)');  // Brightest at center
-    barGradient.addColorStop(1, 'rgba(255, 255, 255, 0.6)');
+    barGradient.addColorStop(0, `rgba(255, 255, 255, ${0.6 * glowIntensity})`);
+    barGradient.addColorStop(0.5, `rgba(255, 255, 255, ${1.0 * glowIntensity})`);  // Brightest at center
+    barGradient.addColorStop(1, `rgba(255, 255, 255, ${0.6 * glowIntensity})`);
 
     ctx.fillStyle = barGradient;
     ctx.fillRect(x - width / 2, y - height / 2, width, height);
 
     // Enhanced white glow around bar - EXTREMELY BRIGHT
-    ctx.shadowColor = 'rgba(255, 255, 255, 1.0)';
-    ctx.shadowBlur = 35;
+    ctx.shadowColor = `rgba(255, 255, 255, ${glowIntensity})`;
+    ctx.shadowBlur = 35 * glowIntensity;
     ctx.fillRect(x - width / 2, y - height / 2, width, height);
     ctx.shadowBlur = 0;
+
+    // Draw subtle interaction hint when hovering (not dragging)
+    if (isHoveringLightBar && !isDragging) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x - width / 2 - 10, y - 30, width + 20, 60);
+    }
 
     // Additional outer glow layers for maximum brightness
     for (let i = 0; i < 4; i++) {
@@ -889,9 +901,14 @@ function render(time) {
 // INTERACTION HANDLERS
 // ============================================================================
 
+/**
+ * Check if mouse is over the draggable light bar area
+ * Larger hit area for easier interaction
+ */
 function isOverLightBar(x, y) {
-    return Math.abs(x - lightBar.x) < lightBar.width / 2 + 50 &&
-           Math.abs(y - lightBar.y) < 50;
+    // Generous hit area: 400px wide, 150px tall around the light bar
+    return Math.abs(x - lightBar.x) < 200 &&
+           Math.abs(y - lightBar.y) < 75;
 }
 
 canvas.addEventListener('mousedown', (e) => {
@@ -912,6 +929,9 @@ canvas.addEventListener('mousemove', (e) => {
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    // Update hover state
+    isHoveringLightBar = isOverLightBar(x, y);
+
     if (isDragging) {
         // Map horizontal drag to angle change
         const dragDelta = x - dragStartX;
@@ -924,17 +944,24 @@ canvas.addEventListener('mousemove', (e) => {
         angleDisplay.textContent = Math.round(lightBar.targetAngle) + '°';
     } else {
         // Change cursor when over light bar
-        canvas.style.cursor = isOverLightBar(x, y) ? 'grab' : 'crosshair';
+        canvas.style.cursor = isHoveringLightBar ? 'grab' : 'crosshair';
     }
 });
 
-canvas.addEventListener('mouseup', () => {
+canvas.addEventListener('mouseup', (e) => {
     isDragging = false;
-    canvas.style.cursor = 'crosshair';
+
+    // Update cursor based on current position
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    isHoveringLightBar = isOverLightBar(x, y);
+    canvas.style.cursor = isHoveringLightBar ? 'grab' : 'crosshair';
 });
 
 canvas.addEventListener('mouseleave', () => {
     isDragging = false;
+    isHoveringLightBar = false;
     canvas.style.cursor = 'crosshair';
 });
 
